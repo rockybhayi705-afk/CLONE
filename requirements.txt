@@ -1,0 +1,10 @@
+pyrotgfork==2.1.33.12
+tgcrypto==1.2.5
+python-dotenv
+psutil
+Dnspython
+uvloop
+git+https://github.com/rahulps1000/pyropatch.git@pyrotgfork
+pytz
+asyncio
+aiosqlite
