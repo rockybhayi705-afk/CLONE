@@ -1,5 +1,5 @@
-pyrotgfork==2.1.33.12
-tgcrypto==1.2.5
+pyrotgfork
+tgcrypto
 python-dotenv
 psutil
 Dnspython
@@ -8,3 +8,4 @@ git+https://github.com/rahulps1000/pyropatch.git@pyrotgfork
 pytz
 asyncio
 aiosqlite
+marshmallow

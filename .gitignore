@@ -222,3 +222,5 @@ downloads/
 unknown_errors.txt
 forward.db
 clone.db
+clonebot/clonebot.session-shm
+clonebot/clonebot.session-wal
