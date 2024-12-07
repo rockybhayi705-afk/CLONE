@@ -5,7 +5,7 @@
 import asyncio
 from sqlite3 import OperationalError
 
-from pyrogram import Client, filters
+from pyrogram import filters
 from pyrogram.errors import FloodWait
 
 from __main__ import bot
