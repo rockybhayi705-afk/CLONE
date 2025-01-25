@@ -549,7 +549,7 @@ async def iter_messages(
             return
         try:
             messages = await bot.get_messages(
-                chat_id, list(range(current, current + new_diff + 1))
+                chat_id=chat_id, message_ids=list(range(current, current + new_diff + 1))
             )
             for message in messages:
                 yield message
