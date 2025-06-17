@@ -20,7 +20,7 @@ class Data(Schema):
     from_channel = fields.Str()
     file_type = fields.Str()
     message_id = fields.Int()
-    use = fields.Str(default="clone")
+    use = fields.Str(load_default="clone")
     worker = fields.Str()
     caption = fields.Str()
 
