@@ -39,7 +39,7 @@ async def init_db():
     async with get_db_connection() as db:
         await db.execute(
             """CREATE TABLE IF NOT EXISTS Files (
-                                file_name TEXT UNIQUE,
+                                file_name TEXT,
                                 file_id TEXT PRIMARY KEY,
                                 from_channel TEXT,
                                 file_type TEXT,
