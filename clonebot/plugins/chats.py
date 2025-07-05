@@ -2,7 +2,7 @@
 #
 # This file is part of clonebot.
 
-from pyrogram import Client, filters
+from pyrogram import filters
 
 from __main__ import bot
 from clonebot import ADMINS

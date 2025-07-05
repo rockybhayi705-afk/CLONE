@@ -22,7 +22,12 @@ from clonebot.utils.constants import (
     START_KB,
     STARTMSG,
     DISCL_TXT,
-    STRT_RET_KB
+    STRT_RET_KB,
+)
+from clonebot.db.clone_sql import (
+    save_custom_caption,
+    remove_custom_caption,
+    get_custom_caption,
 )
 from clonebot.utils.util_support import humanbytes
 
@@ -74,6 +79,7 @@ async def about_cb(bot, query):
         link_preview_options=LinkPreviewOptions(is_disabled=True),
     )
 
+
 @bot.on_callback_query(filters.regex("^disc_"))
 async def disclaimer_sb(bot, query):
     data = query.data.split("_", 1)
@@ -88,6 +94,92 @@ async def disclaimer_sb(bot, query):
         # web_page_preview=False,
         link_preview_options=LinkPreviewOptions(is_disabled=True),
     )
+
+
+@bot.on_message(filters.command("setcaption") & filters.user(ADMINS))
+async def set_custom_caption(bot, message):
+    user_id = message.from_user.id
+    if not message.reply_to_message:
+        await message.reply_text(
+            "❌ **Invalid Usage!**\n\n"
+            "**How to use:**\n"
+            "Reply to a message with `/setcaption`\n\n"
+            "**Features:**\n"
+            "• Use `{file_name}` filename\n"
+            "• Applies to all media files during clone\n\n"
+            "**Example:**\n"
+            "`📁 **File:** {file_name}`\n"
+            "`🔗 **Source:** @MyChannel`",
+            quote=True,
+        )
+        return
+
+    replied_message = message.reply_to_message
+    if replied_message.text:
+        caption_html = replied_message.text.html
+    elif replied_message.caption:
+        caption_html = replied_message.caption.html
+    else:
+        await message.reply_text(
+            "❌ **No text found!**\n\nThe replied message must contain text or caption.",
+            quote=True,
+        )
+        return
+
+    success = await save_custom_caption(caption_html)
+
+    if success:
+        preview_text = "✅ **Custom Caption Saved!**\n\n"
+        preview_text += f"**Preview:**\n{caption_html}\n\n"
+        preview_text += "**Commands:**\n"
+        preview_text += "• `/removecaption` - Remove custom caption\n"
+        preview_text += "• `/showcaption` - View current custom caption"
+
+        await message.reply_text(preview_text, quote=True)
+    else:
+        await message.reply_text(
+            "❌ **Error saving custom caption!**\n\nPlease try again.", quote=True
+        )
+
+
+@bot.on_message(filters.command("removecaption") & filters.user(ADMINS))
+async def remove_caption_cmd(bot, message):
+    success = await remove_custom_caption()
+    if success:
+        await message.reply_text(
+            "✅ **Custom caption removed!**\n\nOriginal captions will be used during clone.",
+            quote=True,
+        )
+    else:
+        await message.reply_text(
+            "❌ **No custom caption found!**\n\nYou haven't set any custom caption yet.",
+            quote=True,
+        )
+
+
+@bot.on_message(filters.command("showcaption") & filters.user(ADMINS))
+async def show_caption_cmd(bot, message):
+    user_id = message.from_user.id
+    caption_html = await get_custom_caption(user_id)
+
+    if caption_html:
+        preview_text = "📋 **Current Custom Caption:**\n\n"
+        preview_text += f"{caption_html}\n\n"
+        preview_text += (
+            "**Placeholder:** `{file_name}` will be replaced with actual filename\n\n"
+        )
+        preview_text += "**Commands:**\n"
+        preview_text += "• `/setcaption` - Update custom caption\n"
+        preview_text += "• `/removecaption` - Remove custom caption"
+
+        await message.reply_text(preview_text, quote=True)
+    else:
+        await message.reply_text(
+            "❌ **No custom caption set!**\n\n"
+            "Use `/setcaption` by replying to a message to set a custom caption.",
+            quote=True,
+        )
+
 
 @bot.on_message(filters.command(["restart"]) & filters.user(ADMINS))
 async def restart(bot, update):

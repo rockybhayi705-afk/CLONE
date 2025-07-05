@@ -42,7 +42,7 @@ async def add_chats(source, destination):
             (source, destination),
         )
         if await existing_chat.fetchone() is not None:
-            print("Duplicate entry found, skipping addition.")
+            LOGGER.info("Duplicate entry found, skipping addition.")
             return "exists"
         await db.execute(
             "INSERT INTO chats (source_channel, destination_channel) VALUES (?, ?)",
@@ -59,7 +59,7 @@ async def remove_chats(source, destination):
             (source, destination),
         )
         if await existing_chat.fetchone() is None:
-            print("No chat found to remove.")
+            LOGGER.info("No chat found to remove.")
             return "not found"
         await db.execute(
             "DELETE FROM chats WHERE source_channel = ? AND destination_channel = ?",

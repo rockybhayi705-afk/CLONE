@@ -60,8 +60,13 @@ If you can make bot admin in source chats, there is no need to use sessions.
 ◆ /index - Index a source chat for cloning. (This helps to omit duplicate files)
 __Always try to use bot only to avoid bans.__
 ◆ /clone - Clone all indexed files to a destination chat.
+◆ /reclone - Resume clone process from where it stopped after bot restart.
 ◆ /total - Get the total count of indexed files.
-◆ /cleardb - Delete the entire indexed files in database.
+◆ /channels - Show current channel distribution and progress.
+◆ /setcaption - Set custom caption by replying to a message.
+◆ /showcaption - View current custom caption.
+◆ /removecaption - Remove custom caption.
+◆ /cleardb - Delete the entire indexed files and channels from database.
 ◆ /status - To find if any cloning job is ongoing.
 
 ✪ **Forwarder Commands:**
@@ -75,6 +80,16 @@ __eg: `/delchat -10012345111 -100123456112`__
 ◆ /restart - Restart the bot.
 ◆ /logs - Get bot logs.
 ◆ /server - Get sever & bot stats.
+
+✪ **Clone Features:**
+◆ Automatic multi-channel distribution
+◆ Progress tracking
+◆ Resume capability after bot restart
+◆ Real-time progress monitoring
+◆ Smart channel switching
+◆ Custom caption support with filename
+◆ Automatic error handling and recovery
+◆ Channel access validation
 """
 
 

@@ -22,7 +22,15 @@ class Data(Schema):
     message_id = fields.Int()
     use = fields.Str(load_default="clone")
     worker = fields.Str()
-    caption = fields.Str()
+    caption = fields.Str(allow_none=True)
+
+
+class ChannelData(Schema):
+    channel_id = fields.Str(required=True)
+    channel_number = fields.Int(required=True)
+    pending_files = fields.Int(required=True)
+    processed_files = fields.Int(load_default=0)
+    status = fields.Str(load_default="pending")
 
 
 @asynccontextmanager
@@ -47,6 +55,16 @@ async def init_db():
                                 use TEXT DEFAULT 'clone',
                                 worker TEXT,
                                 caption TEXT
+                            )"""
+        )
+        
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS Channels (
+                                channel_id TEXT PRIMARY KEY,
+                                channel_number INTEGER,
+                                pending_files INTEGER,
+                                processed_files INTEGER DEFAULT 0,
+                                status TEXT DEFAULT 'pending'
                             )"""
         )
 
@@ -233,6 +251,208 @@ async def delete_data(file_id, from_channel, message_id):
         except Exception as e:
             LOGGER.error(f"Error deleting data from the database: {e}")
             return False
+
+
+async def save_channels(channel_data_list):
+    await init_db()
+    
+    channel_schema = ChannelData()
+    valid_channels = []
+    validation_errors = 0
+    
+    for channel_data in channel_data_list:
+        try:
+            channel_schema.load(channel_data)
+            valid_channels.append((
+                channel_data["channel_id"],
+                channel_data["channel_number"],
+                channel_data["pending_files"],
+                channel_data["processed_files"],
+                channel_data["status"]
+            ))
+        except ValidationError as e:
+            LOGGER.error(
+                "Validation error occurred while saving channel in Database. Error: %s", e
+            )
+            validation_errors += 1
+    
+    if not valid_channels:
+        return False
+    
+    try:
+        async with get_db_connection() as db:
+            await db.execute("DELETE FROM Channels")
+            
+            await db.executemany(
+                """INSERT INTO Channels (channel_id, channel_number, pending_files, processed_files, status)
+                   VALUES (?, ?, ?, ?, ?)""",
+                valid_channels
+            )
+            
+            LOGGER.info(f"Saved {len(valid_channels)} channels to Database")
+            return True
+            
+    except Exception as e:
+        LOGGER.error(f"Error saving channels to database: {e}")
+        return False
+
+
+async def get_channels():
+    try:
+        await init_db()
+        
+        ChannelRecord = namedtuple(
+            "ChannelRecord",
+            [
+                "channel_id",
+                "channel_number", 
+                "pending_files",
+                "processed_files",
+                "status"
+            ],
+        )
+        
+        async with get_db_connection() as db:
+            try:
+                async with db.execute("SELECT * FROM Channels ORDER BY channel_number") as cursor:
+                    rows = await cursor.fetchall()
+                    channels = [ChannelRecord(*row) for row in rows]
+                    LOGGER.info(f"Retrieved {len(channels)} channels from database")
+                    return channels
+            except Exception as e:
+                LOGGER.error(f"Error executing SELECT query in get_channels: {e}")
+                raise
+    except Exception as e:
+        LOGGER.error(f"Error in get_channels function: {e}")
+        raise
+
+
+async def update_channel_progress(channel_id, processed_count):
+    await init_db()
+    
+    try:
+        async with get_db_connection() as db:
+            await db.execute(
+                """UPDATE Channels 
+                   SET processed_files = processed_files + ?, 
+                       pending_files = pending_files - ?
+                   WHERE channel_id = ?""",
+                (processed_count, processed_count, channel_id)
+            )
+            return True
+            
+    except Exception as e:
+        LOGGER.error(f"Error updating channel progress: {e}")
+        return False
+
+
+async def get_channel_by_number(channel_number):
+    await init_db()
+    
+    async with get_db_connection() as db:
+        async with db.execute(
+            "SELECT * FROM Channels WHERE channel_number = ?", 
+            (channel_number,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                ChannelRecord = namedtuple(
+                    "ChannelRecord",
+                    [
+                        "channel_id",
+                        "channel_number", 
+                        "pending_files",
+                        "processed_files",
+                        "status"
+                    ],
+                )
+                return ChannelRecord(*row)
+            return None
+
+
+async def clear_channels():
+    await init_db()
+    
+    try:
+        async with get_db_connection() as db:
+            await db.execute("DELETE FROM Channels")
+            LOGGER.info("Cleared all channels from Database")
+            return True
+    except Exception as e:
+        LOGGER.error(f"Error clearing channels: {e}")
+        return False
+
+
+async def save_custom_caption(caption_html):
+    await init_db()
+    
+    try:
+        async with get_db_connection() as db:
+            await db.execute(
+                """CREATE TABLE IF NOT EXISTS CustomCaption (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    caption_html TEXT
+                )"""
+            )
+            
+            await db.execute(
+                """INSERT OR REPLACE INTO CustomCaption (id, caption_html)
+                   VALUES (1, ?)""",
+                (caption_html,)
+            )
+            
+            LOGGER.info("Saved global custom caption")
+            return True
+            
+    except Exception as e:
+        LOGGER.error(f"Error saving custom caption: {e}")
+        return False
+
+
+async def get_custom_caption():
+    await init_db()
+    
+    try:
+        async with get_db_connection() as db:
+            await db.execute(
+                """CREATE TABLE IF NOT EXISTS CustomCaption (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    caption_html TEXT
+                )"""
+            )
+            
+            async with db.execute(
+                "SELECT caption_html FROM CustomCaption WHERE id = 1"
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return row[0]
+                return None
+                
+    except Exception as e:
+        LOGGER.error(f"Error getting custom caption: {e}")
+        return None
+
+
+async def remove_custom_caption():
+    await init_db()
+    
+    try:
+        async with get_db_connection() as db:
+            result = await db.execute(
+                "DELETE FROM CustomCaption WHERE id = 1"
+            )
+            
+            if result.rowcount > 0:
+                LOGGER.info("Removed global custom caption")
+                return True
+            else:
+                LOGGER.info("No custom caption found")
+                return False
+                
+    except Exception as e:
+        LOGGER.error(f"Error removing custom caption: {e}")
+        return False
 
 
 def init_database():

@@ -4,6 +4,7 @@
 
 import asyncio
 from datetime import datetime
+from typing import AsyncGenerator, Union
 
 import pytz
 from pyrogram import filters, types
@@ -15,20 +16,16 @@ from pyrogram.errors import (
     PeerIdInvalid,
 )
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from pyropatch import listen
-
-from typing import Union, AsyncGenerator
 
 from __main__ import bot, user
 from clonebot import ADMINS, LOGGER, SESSION
 
-from clonebot.db.clone_sql import save_data, save_data_batch
+from clonebot.db.clone_sql import save_data_batch
 from clonebot.utils.file_support import unpack_new_file_id
 
 lock = asyncio.Lock()
 limit_no = ""
 skip_no = ""
-caption = ""
 index_task = None
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -210,7 +207,7 @@ async def clone_till_handler(bot, query):
     limit = None
     if end == "spc":
         mid_mss = await query.message.reply_text(
-            "Send the message ID till where you want to forward."
+            "Send the Message ID till where you want to forward."
         )
         mess = mid_mss
         await query.message.delete()
@@ -309,43 +306,9 @@ async def category_handler(bot, query):
     cat = data[1]
     worker = data[2]
     frm_cnl_id = data[3]
-    skip_no = data[4]
-    limit_no = data[5]
-
-    CAP_BTN = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "No Custom Caption",
-                    callback_data=f"cap_0_{worker}_{frm_cnl_id}_{skip_no}_{limit_no}_{cat}",
-                ),
-                InlineKeyboardButton(
-                    "Custom Caption Required",
-                    callback_data=f"cap_spc_{worker}_{frm_cnl_id}_{skip_no}_{limit_no}_{cat}",
-                ),
-            ]
-        ]
-    )
-    await query.message.edit(
-        text="Please confirm you want to put a custom caption for the files or not.",
-        reply_markup=CAP_BTN,
-    )
-
-
-@bot.on_callback_query(filters.regex("^cap_"))
-async def caption_handler(bot, query, skip_no=None):
-    global index_task
-    user_id = query.from_user.id
-    data = query.data.split("_", 6)
-    cap = data[1]
-    worker = data[2]
-    frm_cnl_id = data[3]
-    skip_no = int(data[4]) if not skip_no else int(skip_no)
+    skip_no = int(data[4])
     limit_no = int(data[5])
-    total = skip_no + limit_no + 1
-    cat = data[6]
-
-    get_caption = None
+    global index_task
     kb = InlineKeyboardMarkup(
         [
             [
@@ -353,54 +316,34 @@ async def caption_handler(bot, query, skip_no=None):
             ]
         ]
     )
-    if cap == "spc":
-        mid_mss = await query.message.reply_text(
-            "Send the custom caption you want to set."
-        )
-        mess = mid_mss
-        await query.message.delete()
-        try:
-            get_caption = await bot.listen_message(
-                chat_id=user_id, filters=filters.text, timeout=300
-            )
-            caption = get_caption.text
-        except TimeoutError:
-            await mid_mss.edit_text(
-                "Error!!\n\nRequest timed out.\nRestart by using /index",
-            )
-            return
-        indx_strt = await mess.reply(
-            "Indexing Started...\nCount will be updated after every 250 files.",
-            reply_markup=kb,
-        )
-        await mess.delete()
-    else:
-        caption = None
-        mess = query.message
-        indx_strt = await mess.edit(
-            "Indexing Started...\nCount will be updated after every 250 files.",
-            reply_markup=kb,
-        )
+
+    mess = query.message
+    indx_strt = await mess.edit(
+        "Indexing Started...\nCount will be updated after every 250 files.",
+        reply_markup=kb,
+    )
 
     index_task = asyncio.create_task(
         index_handler(
-            bot, query, frm_cnl_id, worker, indx_strt, cat, caption, skip_no, limit_no
+            bot, query, frm_cnl_id, worker, indx_strt, cat, skip_no, limit_no
         )
     )
 
 
 async def index_handler(
-    bot, query, frm_cnl_id, worker, indx_strt, cat, caption, skip_no, limit_no
+    bot, query, frm_cnl_id, worker, indx_strt, cat, skip_no, limit_no
 ):
     current = skip_no
     msg_count = 0
     saved = 0
     skipped = 0
     from_chat = int(frm_cnl_id)
-    
+
     batch_size = 100
     batch_data = []
-    
+    media_groups = {}
+    processed_groups = set()
+
     async with lock:
         try:
             if worker == "bot":
@@ -413,18 +356,14 @@ async def index_handler(
                     text="Something went wrong, restart by using /index"
                 )
                 return
-                
+
             async for msg in iter_messages(robot, from_chat, limit_no, current):
                 if msg.empty or msg.service:
                     continue
 
-                msg_caption = ""
                 file_name = ""
-                if caption is not None:
-                    msg_caption = caption
-                elif msg.caption:
-                    msg_caption = msg.caption
-                    
+                msg_caption = msg.caption
+
                 media_types = {
                     "document": MessageMediaType.DOCUMENT,
                     "photo": MessageMediaType.PHOTO,
@@ -435,11 +374,20 @@ async def index_handler(
                     "document": MessageMediaType.DOCUMENT,
                     "video": MessageMediaType.VIDEO,
                 }
-                
+
                 file_id = None
                 file_type = None
                 file_name = None
-                
+
+                if msg.media_group_id:
+                    if msg.media_group_id not in media_groups:
+                        media_groups[msg.media_group_id] = []
+                    media_groups[msg.media_group_id].append(msg)
+                    
+                    msg_count += 1
+                    current += 1
+                    continue
+
                 if cat in ("document", "photo", "video", "audio"):
                     if msg.media and msg.media.value == cat:
                         file_id, file_type, file_name = await get_file_det(msg, worker)
@@ -455,23 +403,27 @@ async def index_handler(
                         file_name = f"message_{from_chat}_{msg.id}"
 
                 if file_name:
-                    batch_data.append({
-                        "file_name": file_name,
-                        "file_id": file_id,
-                        "from_channel": str(from_chat),
-                        "file_type": file_type,
-                        "message_id": msg.id,
-                        "use": "clone",
-                        "worker": worker,
-                        "caption": msg_caption,
-                    })
-                    
+                    batch_data.append(
+                        {
+                            "file_name": file_name,
+                            "file_id": file_id,
+                            "from_channel": str(from_chat),
+                            "file_type": file_type,
+                            "message_id": msg.id,
+                            "use": "clone",
+                            "worker": worker,
+                            "caption": msg_caption,
+                        }
+                    )
+
                     msg_count += 1
                     current += 1
-                    
+
                     if len(batch_data) >= batch_size:
                         try:
-                            batch_saved, batch_skipped = await save_data_batch(batch_data)
+                            batch_saved, batch_skipped = await save_data_batch(
+                                batch_data
+                            )
                             saved += batch_saved
                             skipped += batch_skipped
                             batch_data = []
@@ -479,7 +431,7 @@ async def index_handler(
                             LOGGER.error(f"Batch processing error: {e}")
                             await indx_strt.reply(f"Batch Error:\n{e}")
                             return
-                    
+
                     if msg_count % 250 == 0:
                         kb = InlineKeyboardMarkup(
                             [
@@ -507,6 +459,54 @@ async def index_handler(
                             await indx_strt.reply(f"Error:\n{e}")
                             return
 
+            for media_group_id, group_messages in media_groups.items():
+                if media_group_id in processed_groups:
+                    continue
+                
+                group_messages.sort(key=lambda x: x.id)
+                
+                combined_caption = ""
+                captions = []
+                for group_msg in group_messages:
+                    if group_msg.caption:
+                        captions.append(group_msg.caption)
+                
+                if captions:
+                    combined_caption = "\n\n".join(captions)
+                
+                for idx, group_msg in enumerate(group_messages):
+                    file_id = None
+                    file_type = None
+                    file_name = None
+                    
+                    if cat in ("document", "photo", "video", "audio"):
+                        if group_msg.media and group_msg.media.value == cat:
+                            file_id, file_type, file_name = await get_file_det(group_msg, worker)
+                    elif cat == "docvid":
+                        if group_msg.media and group_msg.media.value in ["document", "video"]:
+                            file_id, file_type, file_name = await get_file_det(group_msg, worker)
+                    elif cat == "empty":
+                        if group_msg.media:
+                            file_id, file_type, file_name = await get_file_det(group_msg, worker)
+                    
+                    if file_name:
+                        caption_to_use = combined_caption if idx == 0 else group_msg.caption
+                        
+                        batch_data.append(
+                            {
+                                "file_name": f"{file_name}_group_{idx+1}",
+                                "file_id": file_id,
+                                "from_channel": str(from_chat),
+                                "file_type": file_type,
+                                "message_id": group_msg.id,
+                                "use": "clone",
+                                "worker": worker,
+                                "caption": caption_to_use,
+                            }
+                        )
+                
+                processed_groups.add(media_group_id)
+
             if batch_data:
                 try:
                     batch_saved, batch_skipped = await save_data_batch(batch_data)
@@ -518,8 +518,13 @@ async def index_handler(
             await indx_strt.edit(
                 f"Successfully Indexed `{msg_count}` messages.\nSaved: `{saved}`\nDuplicate/Skipped: `{skipped}`"
             )
-            LOGGER.info("Successfully Indexed %s messages. Saved: %s, Skipped: %s", msg_count, saved, skipped)
-            
+            LOGGER.info(
+                "Successfully Indexed %s messages. Saved: %s, Skipped: %s",
+                msg_count,
+                saved,
+                skipped,
+            )
+
         except FloodWait as e:
             LOGGER.warning("Floodwait while indexing, sleeping for %s", e.value)
             await asyncio.sleep(e.value)
@@ -561,13 +566,14 @@ async def iter_messages(
             return
         try:
             messages = await bot.get_messages(
-                chat_id=chat_id, message_ids=list(range(current, current + new_diff + 1))
+                chat_id=chat_id,
+                message_ids=list(range(current, current + new_diff + 1)),
             )
             for message in messages:
                 yield message
                 current += 1
         except Exception as e:
-            print(f"Error fetching messages: {e}")
+            LOGGER.error(f"Error fetching messages: {e}")
             return
 
 
