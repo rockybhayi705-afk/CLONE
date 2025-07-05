@@ -54,6 +54,9 @@ async def init_db():
 async def save_data(
     file_name, file_id, from_channel, message_id, worker, caption, file_type
 ):
+
+    await init_db()
+    
     data_schema = Data()
     try:
         data_schema.load(
@@ -97,7 +100,73 @@ async def save_data(
         return False
 
 
+async def save_data_batch(data_list):
+    if not data_list:
+        return 0, 0
+    
+
+    await init_db()
+    
+    data_schema = Data()
+    valid_data = []
+    validation_errors = 0
+    
+    for data in data_list:
+        try:
+            data_schema.load(data)
+            valid_data.append((
+                data["file_name"],
+                data["file_id"], 
+                data["from_channel"],
+                data["file_type"],
+                data["message_id"],
+                "clone",
+                data["worker"],
+                data["caption"]
+            ))
+        except ValidationError as e:
+            LOGGER.error(
+                "Validation error occurred while saving file in Database. Error: %s", e
+            )
+            validation_errors += 1
+    
+    if not valid_data:
+        return 0, len(data_list)
+    
+    saved_count = 0
+    skipped_count = validation_errors
+    
+    try:
+        async with get_db_connection() as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM Files")
+            result = await cursor.fetchone()
+            count_before = result[0] if result else 0
+            
+            await db.executemany(
+                """INSERT OR IGNORE INTO Files (file_name, file_id, from_channel, file_type, message_id, use, worker, caption)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                valid_data
+            )
+            
+            cursor = await db.execute("SELECT COUNT(*) FROM Files")
+            result = await cursor.fetchone()
+            count_after = result[0] if result else 0
+            
+            saved_count = count_after - count_before
+            skipped_count += len(valid_data) - saved_count
+            
+            LOGGER.info(f"Batch saved {saved_count} files/messages to Database, skipped {skipped_count}")
+            return saved_count, skipped_count
+            
+    except Exception as e:
+        LOGGER.error(f"Error during batch save: {e}")
+        return 0, len(data_list)
+
+
 async def get_search_results():
+
+    await init_db()
+    
     FileRecord = namedtuple(
         "FileRecord",
         [
@@ -119,6 +188,9 @@ async def get_search_results():
 
 
 async def count_documents():
+
+    await init_db()
+    
     async with get_db_connection() as db:
         async with db.execute("SELECT COUNT(*) FROM Files") as cursor:
             result = await cursor.fetchone()

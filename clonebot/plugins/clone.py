@@ -111,9 +111,28 @@ async def forward(bot, message):
             if worker == "bot":
                 try:
                     if file_type in ("document", "photo", "video", "audio"):
-                        await bot.send_cached_media(
-                            chat_id=chat_id, file_id=file_id, caption=caption
-                        )
+                        try:
+                            mess = await bot.send_cached_media(
+                                chat_id=chat_id, file_id=file_id, caption=caption
+                            )
+                            
+                        except (
+                            FileReferenceExpired,
+                            FileReferenceEmpty,
+                            MediaEmpty,
+                            ValueError,
+                        ) as e:
+                            LOGGER.error(f"Invalid file_id {file_id}: {e}")
+                            try:                          
+                                mess = await bot.copy_message(
+                                chat_id=chat_id,
+                                from_chat_id=channel,
+                                caption=caption,
+                                message_id=message_id,
+                            )
+                            except Exception as e:
+                                LOGGER.error(f"Error: {e}")
+                        await delete_data(file_id, channel, message_id)
                     else:
                         await bot.copy_message(
                             chat_id=chat_id,
@@ -134,9 +153,19 @@ async def forward(bot, message):
                     LOGGER.warning(f"Floodwait of {e} sec")
                     await asyncio.sleep(e.value)
                     if file_type in ("document", "photo", "video", "audio"):
-                        await bot.send_cached_media(
-                            chat_id=chat_id, file_id=file_id, caption=caption
-                        )
+                        try:
+                            mess = await bot.send_cached_media(
+                                chat_id=chat_id, file_id=file_id, caption=caption
+                            )
+                        except (
+                            FileReferenceExpired,
+                            FileReferenceEmpty,
+                            MediaEmpty,
+                            ValueError,
+                        ) as e:
+                            LOGGER.error(f"Invalid file_id {file_id} after FloodWait: {e}")
+                            await delete_data(file_id, channel, message_id)
+                            continue
                     else:
                         await bot.copy_message(
                             chat_id=chat_id,
@@ -145,8 +174,8 @@ async def forward(bot, message):
                             message_id=message_id,
                         )
                     await asyncio.sleep(1)
-                except ValueError as e:
-                    LOGGER.error(e)
+                except Exception as e:
+                    LOGGER.error(f"Unexpected error: {e}")
                 await delete_data(file_id, channel, message_id)
                 MessageCount += 1
                 try:

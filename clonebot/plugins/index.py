@@ -22,7 +22,7 @@ from typing import Union, AsyncGenerator
 from __main__ import bot, user
 from clonebot import ADMINS, LOGGER, SESSION
 
-from clonebot.db.clone_sql import save_data
+from clonebot.db.clone_sql import save_data, save_data_batch
 from clonebot.utils.file_support import unpack_new_file_id
 
 lock = asyncio.Lock()
@@ -394,10 +394,13 @@ async def index_handler(
 ):
     current = skip_no
     msg_count = 0
-    mcount = 0
     saved = 0
     skipped = 0
     from_chat = int(frm_cnl_id)
+    
+    batch_size = 100
+    batch_data = []
+    
     async with lock:
         try:
             if worker == "bot":
@@ -410,6 +413,7 @@ async def index_handler(
                     text="Something went wrong, restart by using /index"
                 )
                 return
+                
             async for msg in iter_messages(robot, from_chat, limit_no, current):
                 if msg.empty or msg.service:
                     continue
@@ -420,6 +424,7 @@ async def index_handler(
                     msg_caption = caption
                 elif msg.caption:
                     msg_caption = msg.caption
+                    
                 media_types = {
                     "document": MessageMediaType.DOCUMENT,
                     "photo": MessageMediaType.PHOTO,
@@ -430,59 +435,52 @@ async def index_handler(
                     "document": MessageMediaType.DOCUMENT,
                     "video": MessageMediaType.VIDEO,
                 }
+                
+                file_id = None
+                file_type = None
+                file_name = None
+                
                 if cat in ("document", "photo", "video", "audio"):
-                    for media_type in media_types.values():
-                        if msg.media:
-                            if msg.media.value == cat:
-                                file_id, file_type, file_name = await get_file_det(
-                                    msg, worker
-                                )
-                                break
+                    if msg.media and msg.media.value == cat:
+                        file_id, file_type, file_name = await get_file_det(msg, worker)
                 elif cat == "docvid":
-                    for media_type in media_types_2.values():
-                        if msg.media:
-                            if msg.media.value in ["document", "video"]:
-                                file_id, file_type, file_name = await get_file_det(
-                                    msg, worker
-                                )
-                                break
+                    if msg.media and msg.media.value in ["document", "video"]:
+                        file_id, file_type, file_name = await get_file_det(msg, worker)
                 elif cat == "empty":
-                    for media_type in media_types.values():
-                        if msg.media:
-                            file_id, file_type, file_name = await get_file_det(
-                                msg, worker
-                            )
-                            break
-                        else:
-                            file_id = f"{from_chat}_{msg.id}"
-                            file_type = "messages"
-                            file_name = f"message_{from_chat}_{msg.id}"
+                    if msg.media:
+                        file_id, file_type, file_name = await get_file_det(msg, worker)
+                    else:
+                        file_id = f"{from_chat}_{msg.id}"
+                        file_type = "messages"
+                        file_name = f"message_{from_chat}_{msg.id}"
 
                 if file_name:
-                    message_id = msg.id
-                    try:
-                        save = await save_data(
-                            file_name,
-                            file_id,
-                            str(from_chat),
-                            message_id,
-                            worker,
-                            msg_caption,
-                            file_type,
-                        )
-                        if save:
-                            saved += 1
-                        else:
-                            skipped += 1
-                    except ValueError as e:
-                        LOGGER.error(e)
-                        await indx_strt.reply(f"Error:\n{e}")
-                        return
+                    batch_data.append({
+                        "file_name": file_name,
+                        "file_id": file_id,
+                        "from_channel": str(from_chat),
+                        "file_type": file_type,
+                        "message_id": msg.id,
+                        "use": "clone",
+                        "worker": worker,
+                        "caption": msg_caption,
+                    })
+                    
                     msg_count += 1
-                    mcount += 1
                     current += 1
-                    new_skip_no = str(skip_no + msg_count)
-                    if mcount == 250:
+                    
+                    if len(batch_data) >= batch_size:
+                        try:
+                            batch_saved, batch_skipped = await save_data_batch(batch_data)
+                            saved += batch_saved
+                            skipped += batch_skipped
+                            batch_data = []
+                        except Exception as e:
+                            LOGGER.error(f"Batch processing error: {e}")
+                            await indx_strt.reply(f"Batch Error:\n{e}")
+                            return
+                    
+                    if msg_count % 250 == 0:
                         kb = InlineKeyboardMarkup(
                             [
                                 [
@@ -496,10 +494,9 @@ async def index_handler(
                             datetime_ist = datetime.now(IST)
                             ISTIME = datetime_ist.strftime("%I:%M:%S %p - %d %B %Y")
                             await indx_strt.edit(
-                                text=f"Total Indexed : `{msg_count}`\nSaved:`{saved}`\nLast edited at `{ISTIME}`",
+                                text=f"Total Indexed : `{msg_count}`\nSaved:`{saved}`\nSkipped:`{skipped}`\nLast edited at `{ISTIME}`",
                                 reply_markup=kb,
                             )
-                            mcount -= 250
                         except FloodWait as e:
                             LOGGER.warning(
                                 "Floodwait while indexing, sleeping for %s", e.value
@@ -510,17 +507,26 @@ async def index_handler(
                             await indx_strt.reply(f"Error:\n{e}")
                             return
 
+            if batch_data:
+                try:
+                    batch_saved, batch_skipped = await save_data_batch(batch_data)
+                    saved += batch_saved
+                    skipped += batch_skipped
+                except Exception as e:
+                    LOGGER.error(f"Final batch processing error: {e}")
+
             await indx_strt.edit(
-                f"Succesfully Indexed `{msg_count}` messages.\nSaved: `{saved}`\nDuplicate/Skipped: `{skipped}`"
+                f"Successfully Indexed `{msg_count}` messages.\nSaved: `{saved}`\nDuplicate/Skipped: `{skipped}`"
             )
-            LOGGER.info("Succesfully Indexed %s messages", msg_count)
+            LOGGER.info("Successfully Indexed %s messages. Saved: %s, Skipped: %s", msg_count, saved, skipped)
+            
         except FloodWait as e:
             LOGGER.warning("Floodwait while indexing, sleeping for %s", e.value)
             await asyncio.sleep(e.value)
             await indx_strt.edit("Continuing indexing after Floodwait...")
             await index_handler(bot, query, skip_no=current)
-        except ValueError as e:
-            LOGGER.error(e)
+        except Exception as e:
+            LOGGER.error(f"Error during indexing: {e}")
             await indx_strt.edit_text(f"Error:\n{e}")
 
 
@@ -532,7 +538,13 @@ async def get_file_det(msg, worker):
         elif worker == "user":
             file_id = media.file_id
         file_type = msg.media.value
-        file_name = file_name = getattr(media, "file_name", "No Name")
+
+        if file_type == "photo":
+            file_name = file_id
+        else:
+            file_name = getattr(media, "file_name", None)
+            if file_name is None:
+                file_name = file_id
     return file_id, file_type, file_name
 
 
