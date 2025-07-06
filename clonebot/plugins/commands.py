@@ -98,7 +98,6 @@ async def disclaimer_sb(bot, query):
 
 @bot.on_message(filters.command("setcaption") & filters.user(ADMINS))
 async def set_custom_caption(bot, message):
-    user_id = message.from_user.id
     if not message.reply_to_message:
         await message.reply_text(
             "❌ **Invalid Usage!**\n\n"
@@ -159,8 +158,7 @@ async def remove_caption_cmd(bot, message):
 
 @bot.on_message(filters.command("showcaption") & filters.user(ADMINS))
 async def show_caption_cmd(bot, message):
-    user_id = message.from_user.id
-    caption_html = await get_custom_caption(user_id)
+    caption_html = await get_custom_caption()
 
     if caption_html:
         preview_text = "📋 **Current Custom Caption:**\n\n"
